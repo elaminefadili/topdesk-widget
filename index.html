@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tickets TopDesk</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: #ffffff;
+            font-size: 12px;
+        }
+        .widget-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+        .widget-header {
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .widget-title {
+            font-weight: bold;
+            color: #333;
+            font-size: 13px;
+        }
+        .refresh-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .refresh-btn:hover {
+            background: #0056b3;
+        }
+        .widget-content {
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .ticket-item {
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 0 4px 4px 0;
+        }
+        .ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .ticket-number {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 12px;
+        }
+        .ticket-status {
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+        }
+        .status-open { background-color: #dc3545; }
+        .status-progress { background-color: #ffc107; color: #000; }
+        .status-resolved { background-color: #28a745; }
+        .status-waiting { background-color: #6c757d; }
+        .ticket-description {
+            font-size: 11px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .ticket-meta {
+            font-size: 10px;
+            color: #666;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 11px;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin: 5px 0;
+        }
+        .no-tickets {
+            text-align: center;
+            padding: 15px;
+            color: #666;
+            font-size: 11px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="widget-container">
+        <div class="widget-header">
+            <span class="widget-title">🎫 Tickets TopDesk</span>
+            <button class="refresh-btn" onclick="loadTickets()">🔄</button>
+        </div>
+        <div class="widget-content" id="ticketsContent">
+            <div class="loading">Chargement...</div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration TopDesk
+        const TOPDESK_CONFIG = {
+            baseUrl: 'https://hdmp.topdesk.net',
+            apiPath: '/tas/api/incidents',
+            // REMPLACEZ par vos identifiants
+            auth: {
+                username: 'VOTRE_USERNAME',
+                password: 'VOTRE_PASSWORD'
+            }
+        };
+
+        // Fonction pour récupérer les informations du contact depuis Efficy
+        function getEfficyContactInfo() {
+            try {
+                // Tentative d'accès au contexte Efficy parent
+                if (window.parent && window.parent.efficy) {
+                    // Récupération des données du contact courant
+                    const currentContact = window.parent.efficy.getCurrentContact();
+                    return {
+                        email: currentContact?.email || '',
+                        company: currentContact?.company || 'Praktijkhuis 74',
+                        branch: currentContact?.branch || 'Praktijkhuis 74'
+                    };
+                }
+                
+                // Alternative : via les variables globales Efficy
+                if (window.parent && window.parent.document) {
+                    const emailField = window.parent.document.querySelector('[name*="email"], [id*="email"]');
+                    const companyField = window.parent.document.querySelector('[name*="company"], [id*="company"]');
+                    
+                    return {
+                        email: emailField?.value || '',
+                        company: companyField?.value || 'Praktijkhuis 74',
+                        branch: 'Praktijkhuis 74'
+                    };
+                }
+                
+                // Valeur par défaut si pas d'accès au parent
+                return {
+                    email: '',
+                    company: 'Praktijkhuis 74',
+                    branch: 'Praktijkhuis 74'
+                };
+                
+            } catch (error) {
+                console.log('Impossible d\'accéder au contexte Efficy:', error);
+                return {
+                    email: '',
+                    company: 'Praktijkhuis 74',
+                    branch: 'Praktijkhuis 74'
+                };
+            }
+        }
+
+        // Fonction pour l'authentification TopDesk
+        function getAuthHeaders() {
+            const auth = btoa(TOPDESK_CONFIG.auth.username + ':' + TOPDESK_CONFIG.auth.password);
+            return {
+                'Authorization': 'Basic ' + auth,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            };
+        }
+
+        // Fonction pour récupérer les tickets
+        async function fetchTopDeskTickets(contactInfo) {
+            try {
+                // Construction de la requête basée sur les infos du contact
+                let query = '';
+                if (contactInfo.email) {
+                    query = `caller.email=="${contactInfo.email}"`;
+                } else {
+                    query = `caller.branch.name=="${contactInfo.branch}"`;
+                }
+                
+                const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(query)}&page_size=50`;
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erreur API TopDesk: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return Array.isArray(data) ? data : [];
+                
+            } catch (error) {
+                console.error('Erreur fetch TopDesk:', error);
+                throw error;
+            }
+        }
+
+        // Fonction pour déterminer la classe du statut
+        function getStatusClass(status) {
+            if (!status) return 'status-open';
+            
+            const s = status.toLowerCase();
+            if (s.includes('progress') || s.includes('behandeling') || s.includes('cours')) return 'status-progress';
+            if (s.includes('resolved') || s.includes('opgelost') || s.includes('fermé')) return 'status-resolved';
+            if (s.includes('waiting') || s.includes('wacht') || s.includes('attente')) return 'status-waiting';
+            return 'status-open';
+        }
+
+        // Fonction pour formater la date
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('fr-FR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (e) {
+                return '';
+            }
+        }
+
+        // Fonction pour afficher les tickets
+        function displayTickets(tickets, contactInfo) {
+            const container = document.getElementById('ticketsContent');
+            
+            if (!tickets || tickets.length === 0) {
+                container.innerHTML = `
+                    <div class="no-tickets">
+                        Aucun ticket trouvé<br>
+                        <small>Recherche: ${contactInfo.email || contactInfo.branch}</small>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            tickets.forEach(ticket => {
+                const statusClass = getStatusClass(ticket.processingStatus?.name);
+                
+                html += `
+                    <div class="ticket-item">
+                        <div class="ticket-header">
+                            <span class="ticket-number">#${ticket.number || 'N/A'}</span>
+                            <span class="ticket-status ${statusClass}">
+                                ${ticket.processingStatus?.name || 'Inconnu'}
+                            </span>
+                        </div>
+                        <div class="ticket-description">
+                            ${ticket.briefDescription || 'Sans description'}
+                        </div>
+                        <div class="ticket-meta">
+                            Priorité: ${ticket.priority?.name || 'N/D'} | 
+                            Créé: ${formatDate(ticket.creationDate)}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        // Fonction pour afficher les erreurs
+        function displayError(message) {
+            document.getElementById('ticketsContent').innerHTML = `
+                <div class="error">
+                    Erreur: ${message}<br>
+                    <small>Vérifiez la configuration d'authentification</small>
+                </div>
+            `;
+        }
+
+        // Fonction principale de chargement
+        async function loadTickets() {
+            const container = document.getElementById('ticketsContent');
+            container.innerHTML = '<div class="loading">Chargement des tickets...</div>';
+            
+            try {
+                const contactInfo = getEfficyContactInfo();
+                const tickets = await fetchTopDeskTickets(contactInfo);
+                displayTickets(tickets, contactInfo);
+            } catch (error) {
+                displayError(error.message);
+            }
+        }
+
+        // Version de démonstration (pour test sans API)
+        function loadDemoTickets() {
+            const demoTickets = [
+                {
+                    number: 'INC-001234',
+                    briefDescription: 'Problème de connexion réseau',
+                    processingStatus: { name: 'En cours' },
+                    priority: { name: 'Haute' },
+                    creationDate: '2025-05-26T10:30:00Z'
+                },
+                {
+                    number: 'INC-001235',
+                    briefDescription: 'Installation logiciel demandée',
+                    processingStatus: { name: 'Ouvert' },
+                    priority: { name: 'Moyenne' },
+                    creationDate: '2025-05-25T14:15:00Z'
+                }
+            ];
+            
+            setTimeout(() => {
+                displayTickets(demoTickets, { branch: 'Praktijkhuis 74' });
+            }, 1000);
+        }
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            // Pour tester : utilisez loadDemoTickets()
+            // Pour la production : utilisez loadTickets()
+            loadDemoTickets(); // Changez par loadTickets() quand prêt
+        });
+    </script>
+</body>
+</html>
