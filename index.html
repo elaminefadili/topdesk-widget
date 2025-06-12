@@ -126,50 +126,126 @@
             apiPath: '/tas/api/incidents',
             // REMPLACEZ par vos identifiants
             auth: {
-                username: 'VOTRE_USERNAME',
-                password: 'VOTRE_PASSWORD'
+                username: 'csvupload',
+                password: 'xe3pm-ajyse-o4kh2-g2pnf-nznz3'
             }
         };
 
-        // Fonction pour récupérer les informations du contact depuis Efficy
+        // Fonction pour récupérer les informations de l'entité Efficy courante
         function getEfficyContactInfo() {
             try {
-                // Tentative d'accès au contexte Efficy parent
-                if (window.parent && window.parent.efficy) {
-                    // Récupération des données du contact courant
-                    const currentContact = window.parent.efficy.getCurrentContact();
-                    return {
-                        email: currentContact?.email || '',
-                        company: currentContact?.company || 'Praktijkhuis 74',
-                        branch: currentContact?.branch || 'Praktijkhuis 74'
-                    };
-                }
+                console.log('=== Début récupération données Efficy ===');
                 
-                // Alternative : via les variables globales Efficy
-                if (window.parent && window.parent.document) {
-                    const emailField = window.parent.document.querySelector('[name*="email"], [id*="email"]');
-                    const companyField = window.parent.document.querySelector('[name*="company"], [id*="company"]');
+                // Méthode 1 : Accès direct à l'entité courante via Efficy API
+                if (window.parent && window.parent.entity) {
+                    console.log('Entity Efficy détectée:', window.parent.entity);
+                    const entity = window.parent.entity;
                     
+                    // Tentative de récupération des champs de l'entité
+                    const possibleBranchFields = [
+                        'branch', 'branche', 'vestiging', 'location', 'locatie',
+                        'company', 'bedrijf', 'naam', 'name', 'companyname'
+                    ];
+                    
+                    for (const fieldName of possibleBranchFields) {
+                        if (entity[fieldName]) {
+                            console.log(`Champ entité trouvé: ${fieldName} = ${entity[fieldName]}`);
+                            return {
+                                branch: entity[fieldName],
+                                source: `entity.${fieldName}`,
+                                entityType: entity.entityType || 'unknown'
+                            };
+                        }
+                    }
+                    
+                    // Log de tous les champs disponibles pour debug
+                    console.log('Champs disponibles dans l\'entité:', Object.keys(entity));
+                }
+                
+                // Méthode 2 : Via window.parent.efficy si disponible
+                if (window.parent && window.parent.efficy) {
+                    console.log('API Efficy disponible');
+                    try {
+                        const currentRecord = window.parent.efficy.api.getCurrentRecord();
+                        if (currentRecord) {
+                            console.log('Record courant:', currentRecord);
+                            return {
+                                branch: currentRecord.company || currentRecord.name || 'Praktijkhuis 74',
+                                source: 'efficy.api.getCurrentRecord',
+                                recordId: currentRecord.id
+                            };
+                        }
+                    } catch (e) {
+                        console.log('Erreur API getCurrentRecord:', e);
+                    }
+                }
+                
+                // Méthode 3 : Recherche dans le DOM de la page parent
+                if (window.parent && window.parent.document) {
+                    console.log('Recherche dans le DOM parent...');
+                    
+                    // Recherche de champs input/select avec des noms potentiels
+                    const fieldSelectors = [
+                        'input[name*="company"]', 'select[name*="company"]',
+                        'input[name*="vestiging"]', 'select[name*="vestiging"]',
+                        'input[name*="branch"]', 'select[name*="branch"]',
+                        'input[name*="bedrijf"]', 'select[name*="bedrijf"]',
+                        'input[name*="naam"]', 'select[name*="naam"]'
+                    ];
+                    
+                    for (const selector of fieldSelectors) {
+                        const field = window.parent.document.querySelector(selector);
+                        if (field && field.value) {
+                            console.log(`Champ DOM trouvé: ${selector} = ${field.value}`);
+                            return {
+                                branch: field.value,
+                                source: `dom.${selector}`,
+                                fieldName: field.name || field.id
+                            };
+                        }
+                    }
+                    
+                    // Recherche dans les labels/spans qui affichent les données
+                    const textSelectors = [
+                        '.entity-field', '.field-value', '.company-name',
+                        'span[data-field*="company"]', 'span[data-field*="vestiging"]'
+                    ];
+                    
+                    for (const selector of textSelectors) {
+                        const element = window.parent.document.querySelector(selector);
+                        if (element && element.textContent.trim()) {
+                            console.log(`Élément texte trouvé: ${selector} = ${element.textContent.trim()}`);
+                            return {
+                                branch: element.textContent.trim(),
+                                source: `text.${selector}`
+                            };
+                        }
+                    }
+                }
+                
+                // Méthode 4 : Paramètre URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const branchParam = urlParams.get('branch') || urlParams.get('entity');
+                if (branchParam) {
+                    console.log(`Paramètre URL trouvé: ${branchParam}`);
                     return {
-                        email: emailField?.value || '',
-                        company: companyField?.value || 'Praktijkhuis 74',
-                        branch: 'Praktijkhuis 74'
+                        branch: branchParam,
+                        source: 'url-parameter'
                     };
                 }
                 
-                // Valeur par défaut si pas d'accès au parent
+                console.log('Aucune donnée spécifique trouvée, utilisation valeur par défaut');
                 return {
-                    email: '',
-                    company: 'Praktijkhuis 74',
-                    branch: 'Praktijkhuis 74'
+                    branch: 'Praktijkhuis 74',
+                    source: 'default-fallback'
                 };
                 
             } catch (error) {
-                console.log('Impossible d\'accéder au contexte Efficy:', error);
+                console.error('Erreur lors de la récupération:', error);
                 return {
-                    email: '',
-                    company: 'Praktijkhuis 74',
-                    branch: 'Praktijkhuis 74'
+                    branch: 'Praktijkhuis 74',
+                    source: 'error-fallback',
+                    error: error.message
                 };
             }
         }
@@ -187,15 +263,13 @@
         // Fonction pour récupérer les tickets
         async function fetchTopDeskTickets(contactInfo) {
             try {
-                // Construction de la requête basée sur les infos du contact
-                let query = '';
-                if (contactInfo.email) {
-                    query = `caller.email=="${contactInfo.email}"`;
-                } else {
-                    query = `caller.branch.name=="${contactInfo.branch}"`;
-                }
+                console.log('Recherche des tickets pour:', contactInfo.branch);
                 
+                // Construction de la requête basée sur la branche
+                const query = `caller.branch.name=="${contactInfo.branch}"`;
                 const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(query)}&page_size=50`;
+                
+                console.log('URL API:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -203,10 +277,11 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Erreur API TopDesk: ${response.status}`);
+                    throw new Error(`Erreur API TopDesk: ${response.status} - ${response.statusText}`);
                 }
 
                 const data = await response.json();
+                console.log('Données reçues:', data);
                 return Array.isArray(data) ? data : [];
                 
             } catch (error) {
@@ -250,7 +325,8 @@
                 container.innerHTML = `
                     <div class="no-tickets">
                         Aucun ticket trouvé<br>
-                        <small>Recherche: ${contactInfo.email || contactInfo.branch}</small>
+                        <small>Branche: ${contactInfo.branch}</small><br>
+                        <small>Source: ${contactInfo.source}</small>
                     </div>
                 `;
                 return;
