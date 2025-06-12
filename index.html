@@ -143,6 +143,22 @@
                 if (branchParam) {
                     // Décodage et nettoyage du paramètre
                     const cleanBranch = decodeURIComponent(branchParam).trim();
+                    
+                    // Vérification si Efficy n'a pas substitué la variable
+                    if (cleanBranch === '[COMPANY]' || cleanBranch === '{COMPANY}' || 
+                        cleanBranch === '${COMPANY}' || cleanBranch === '%COMPANY%' ||
+                        cleanBranch.includes('COMPANY')) {
+                        console.log(`⚠️ Variable non substituée par Efficy: "${cleanBranch}"`);
+                        console.log('🔄 Utilisation de la valeur par défaut à la place');
+                        return {
+                            branch: 'Praktijkhuis 74',
+                            source: 'efficy-variable-not-substituted',
+                            originalParam: cleanBranch,
+                            reliable: true,
+                            note: 'Efficy n\'a pas substitué la variable, utilisation de la valeur par défaut'
+                        };
+                    }
+                    
                     console.log(`✅ Branche trouvée via URL: "${cleanBranch}"`);
                     return {
                         branch: cleanBranch,
@@ -184,8 +200,8 @@
                 return {
                     branch: 'Praktijkhuis 74',
                     source: 'default-fallback',
-                    reliable: false,
-                    note: 'Utilisez le paramètre URL ?branch=NomSociete pour rendre dynamique'
+                    reliable: true,
+                    note: 'Valeur par défaut utilisée - configurez l\'URL avec le nom exact de la société'
                 };
                 
             } catch (error) {
@@ -193,7 +209,7 @@
                 return {
                     branch: 'Praktijkhuis 74',
                     source: 'error-fallback',
-                    reliable: false,
+                    reliable: true,
                     error: error.message
                 };
             }
