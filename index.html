@@ -126,8 +126,8 @@
             apiPath: '/tas/api/incidents',
             // REMPLACEZ par vos identifiants
             auth: {
-                username: 'csvupload',
-                password: 'xe3pm-ajyse-o4kh2-g2pnf-nznz3'
+                username: 'VOTRE_USERNAME',
+                password: 'VOTRE_PASSWORD'
             }
         };
 
@@ -179,7 +179,8 @@
                     };
                 }
                 
-                // Méthode 2 : Extraction depuis l'URL parent et appel API
+                // Méthode 2 : Extraction depuis l'URL parent et appel API (PRIORITAIRE)
+                console.log('🔍 Tentative d\'extraction depuis l\'URL parent...');
                 const entityData = await getEfficyEntityFromParentUrl();
                 if (entityData && entityData.branch) {
                     console.log(`✅ Branche trouvée via API Efficy: "${entityData.branch}"`);
@@ -206,8 +207,24 @@
                     };
                 }
                 
+                // Méthode 4 : Demande active à Efficy (en dernier recours)
+                console.log('📤 Demande de données à Efficy...');
+                requestDataFromEfficy();
+                
+                // Attente des données avec timeout réduit
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                if (efficyData && efficyData.companyName) {
+                    console.log(`✅ Données reçues après demande: "${efficyData.companyName}"`);
+                    return {
+                        branch: efficyData.companyName,
+                        source: 'postmessage-after-request',
+                        reliable: true
+                    };
+                }
+                
                 console.log('❌ Impossible de récupérer le nom de société');
-                throw new Error('Nom de société non trouvé - vérifiez la configuration');
+                throw new Error('Nom de société non trouvé - toutes les méthodes ont échoué');
                 
             } catch (error) {
                 console.error('❌ Erreur lors de la récupération:', error);
@@ -216,7 +233,7 @@
                 console.log('🔄 Utilisation temporaire de Praktijkhuis 74');
                 return {
                     branch: 'Praktijkhuis 74',
-                    source: 'error-fallback',
+                    source: 'error-fallback-temp',
                     reliable: false,
                     error: error.message
                 };
@@ -229,37 +246,55 @@
                 console.log('🔍 Extraction des données depuis l\'URL parent...');
                 
                 let parentUrl;
+                let entityType, entityKey;
+                
+                // Tentative 1 : Accès direct à l'URL parent
                 try {
                     parentUrl = window.parent.location.href;
-                    console.log('URL parent accessible:', parentUrl);
+                    console.log('✅ URL parent accessible:', parentUrl);
                 } catch (corsError) {
-                    console.log('❌ URL parent non accessible (CORS)');
+                    console.log('❌ URL parent non accessible (CORS):', corsError.message);
                     
-                    // Alternative : essayer de deviner depuis l'URL du widget
-                    const currentUrl = window.location.href;
-                    console.log('URL courante:', currentUrl);
-                    
-                    // Si on est sur healthone.efficy.cloud, on peut essayer l'API
-                    if (currentUrl.includes('elaminefadili.github.io')) {
-                        console.log('Widget hébergé sur GitHub, tentative d\'API cross-origin...');
-                        return await tryEfficyApiCrossOrigin();
+                    // Tentative 2 : Via document.referrer
+                    try {
+                        parentUrl = document.referrer;
+                        if (parentUrl) {
+                            console.log('✅ URL parent via referrer:', parentUrl);
+                        } else {
+                            throw new Error('Document.referrer vide');
+                        }
+                    } catch (e) {
+                        console.log('❌ Document.referrer non disponible');
+                        
+                        // Tentative 3 : Hardcodé pour test
+                        console.log('🧪 Test avec URL hardcodée...');
+                        parentUrl = 'https://healthone.efficy.cloud/crm/consult?ENTITY=Comp&PAGE=pages/desktop/Consult.htm&DETAIL=Cont&KEY=10351&CONSULTHANDLE=161&nocache=true';
+                        console.log('URL de test:', parentUrl);
                     }
-                    
-                    throw new Error('Impossible d\'accéder à l\'URL parent');
                 }
                 
-                // Extraction de ENTITY et KEY depuis l'URL parent
+                if (!parentUrl) {
+                    throw new Error('Impossible d\'obtenir l\'URL parent');
+                }
+                
+                // Extraction de ENTITY et KEY depuis l'URL
+                console.log('🔍 Recherche de ENTITY et KEY dans:', parentUrl);
+                
                 const entityMatch = parentUrl.match(/[?&]ENTITY=([^&]+)/i);
                 const keyMatch = parentUrl.match(/[?&]KEY=([^&]+)/i);
                 
+                console.log('Résultat regex ENTITY:', entityMatch);
+                console.log('Résultat regex KEY:', keyMatch);
+                
                 if (!entityMatch || !keyMatch) {
                     console.log('❌ ENTITY ou KEY non trouvé dans l\'URL');
-                    console.log('Patterns recherchés: ENTITY= et KEY=');
+                    console.log('Patterns recherchés: [?&]ENTITY= et [?&]KEY=');
+                    console.log('URL analysée:', parentUrl);
                     throw new Error('Impossible d\'extraire ENTITY/KEY de l\'URL');
                 }
                 
-                const entityType = entityMatch[1];
-                const entityKey = keyMatch[1];
+                entityType = entityMatch[1];
+                entityKey = keyMatch[1];
                 
                 console.log(`✅ Entité extraite: ${entityType}, ID: ${entityKey}`);
                 
@@ -267,7 +302,8 @@
                 return await callEfficyApi(entityType, entityKey);
                 
             } catch (error) {
-                console.log('Erreur extraction URL parent:', error.message);
+                console.log('❌ Erreur extraction URL parent:', error.message);
+                console.log('Stack:', error.stack);
                 return null;
             }
         }
