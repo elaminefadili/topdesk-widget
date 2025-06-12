@@ -244,11 +244,11 @@
             try {
                 console.log('Recherche des tickets pour:', contactInfo.branch);
                 
-                // Construction de la requête simple (sans filtres complexes qui causent l'erreur 400)
+                // Retour à la requête simple qui fonctionnait
                 const query = `caller.branch.name=="${contactInfo.branch}"`;
                 const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(query)}&page_size=50`;
                 
-                console.log('URL API simplifiée:', url);
+                console.log('URL API:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -262,25 +262,15 @@
                 const data = await response.json();
                 console.log('Données reçues:', data);
                 
-                // Filtrage côté client pour les tickets ouverts
+                // Filtrage côté client pour garder seulement les tickets ouverts
                 const openTickets = Array.isArray(data) ? data.filter(ticket => {
                     const status = ticket.status?.toLowerCase() || '';
-                    const processingStatus = ticket.processingStatus?.name?.toLowerCase() || '';
                     
-                    // Exclure les tickets fermés/résolus
-                    const isClosed = status.includes('closed') || 
-                                   status.includes('resolved') || 
-                                   status.includes('cancelled') || 
-                                   status.includes('completed') ||
-                                   processingStatus.includes('opgelost') ||
-                                   processingStatus.includes('gesloten') ||
-                                   processingStatus.includes('resolved') ||
-                                   processingStatus.includes('closed');
-                    
-                    return !isClosed;
+                    // Gardons seulement firstLine et secondLine (tickets ouverts dans TopDesk)
+                    return status === 'firstline' || status === 'secondline';
                 }) : [];
                 
-                console.log(`Tickets filtrés: ${openTickets.length} tickets ouverts sur ${data.length} total`);
+                console.log(`Tickets filtrés: ${openTickets.length} tickets ouverts (firstLine + secondLine) sur ${data.length} total`);
                 return openTickets;
                 
             } catch (error) {
