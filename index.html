@@ -179,7 +179,20 @@
                     };
                 }
                 
-                // Méthode 2 : Paramètre URL (pour test manuel)
+                // Méthode 2 : Extraction depuis l'URL parent et appel API
+                const entityData = await getEfficyEntityFromParentUrl();
+                if (entityData && entityData.branch) {
+                    console.log(`✅ Branche trouvée via API Efficy: "${entityData.branch}"`);
+                    return {
+                        branch: entityData.branch,
+                        source: 'efficy-api-success',
+                        reliable: true,
+                        entityId: entityData.id,
+                        entityType: entityData.entityType
+                    };
+                }
+                
+                // Méthode 3 : Paramètre URL (pour test manuel)
                 const urlParams = new URLSearchParams(window.location.search);
                 const branchParam = urlParams.get('branch') || urlParams.get('company');
                 
@@ -193,41 +206,151 @@
                     };
                 }
                 
-                // Méthode 3 : Demande active à Efficy
-                console.log('📤 Demande de données à Efficy...');
-                requestDataFromEfficy();
-                
-                // Attente des données avec timeout
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                
-                if (efficyData && efficyData.companyName) {
-                    console.log(`✅ Données reçues après demande: "${efficyData.companyName}"`);
-                    return {
-                        branch: efficyData.companyName,
-                        source: 'postmessage-after-request',
-                        reliable: true
-                    };
-                }
-                
-                console.log('❌ Aucune donnée reçue d\'Efficy');
-                
-                // Fallback temporaire pour test
-                console.log('🔄 Utilisation temporaire de Praktijkhuis 74 pour test');
-                return {
-                    branch: 'Praktijkhuis 74',
-                    source: 'temporary-fallback',
-                    reliable: false,
-                    note: 'Widget en attente de configuration dynamique avec Efficy'
-                };
+                console.log('❌ Impossible de récupérer le nom de société');
+                throw new Error('Nom de société non trouvé - vérifiez la configuration');
                 
             } catch (error) {
                 console.error('❌ Erreur lors de la récupération:', error);
+                
+                // Fallback temporaire pour continuer à fonctionner
+                console.log('🔄 Utilisation temporaire de Praktijkhuis 74');
                 return {
                     branch: 'Praktijkhuis 74',
                     source: 'error-fallback',
                     reliable: false,
                     error: error.message
                 };
+            }
+        }
+        
+        // Fonction pour récupérer les données d'entité depuis l'URL parent
+        async function getEfficyEntityFromParentUrl() {
+            try {
+                console.log('🔍 Extraction des données depuis l\'URL parent...');
+                
+                let parentUrl;
+                try {
+                    parentUrl = window.parent.location.href;
+                    console.log('URL parent accessible:', parentUrl);
+                } catch (corsError) {
+                    console.log('❌ URL parent non accessible (CORS)');
+                    
+                    // Alternative : essayer de deviner depuis l'URL du widget
+                    const currentUrl = window.location.href;
+                    console.log('URL courante:', currentUrl);
+                    
+                    // Si on est sur healthone.efficy.cloud, on peut essayer l'API
+                    if (currentUrl.includes('elaminefadili.github.io')) {
+                        console.log('Widget hébergé sur GitHub, tentative d\'API cross-origin...');
+                        return await tryEfficyApiCrossOrigin();
+                    }
+                    
+                    throw new Error('Impossible d\'accéder à l\'URL parent');
+                }
+                
+                // Extraction de ENTITY et KEY depuis l'URL parent
+                const entityMatch = parentUrl.match(/[?&]ENTITY=([^&]+)/i);
+                const keyMatch = parentUrl.match(/[?&]KEY=([^&]+)/i);
+                
+                if (!entityMatch || !keyMatch) {
+                    console.log('❌ ENTITY ou KEY non trouvé dans l\'URL');
+                    console.log('Patterns recherchés: ENTITY= et KEY=');
+                    throw new Error('Impossible d\'extraire ENTITY/KEY de l\'URL');
+                }
+                
+                const entityType = entityMatch[1];
+                const entityKey = keyMatch[1];
+                
+                console.log(`✅ Entité extraite: ${entityType}, ID: ${entityKey}`);
+                
+                // Appel de l'API Efficy pour récupérer les données
+                return await callEfficyApi(entityType, entityKey);
+                
+            } catch (error) {
+                console.log('Erreur extraction URL parent:', error.message);
+                return null;
+            }
+        }
+        
+        // Fonction pour appeler l'API Efficy
+        async function callEfficyApi(entityType, entityKey) {
+            try {
+                console.log(`📞 Appel API Efficy pour ${entityType}:${entityKey}`);
+                
+                // Construction de l'URL API Efficy
+                const baseUrl = 'https://healthone.efficy.cloud';
+                const apiUrl = `${baseUrl}/crm/json.ashx?action=getRecord&entity=${entityType}&key=${entityKey}`;
+                
+                console.log('URL API Efficy:', apiUrl);
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    credentials: 'include', // Utilise la session Efficy courante
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Statut API Efficy:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    throw new Error(`API Efficy error: ${response.status} - ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('✅ Données reçues de l\'API Efficy:', data);
+                
+                // Extraction du nom de société depuis les données
+                if (data && data.fields) {
+                    // Recherche dans différents champs possibles
+                    const possibleNameFields = ['COMPANY', 'NAME', 'NAAM', 'COMPANYNAME', 'BEDRIJF'];
+                    let companyName = null;
+                    
+                    for (const fieldName of possibleNameFields) {
+                        if (data.fields[fieldName]) {
+                            companyName = data.fields[fieldName];
+                            console.log(`Nom société trouvé dans ${fieldName}: ${companyName}`);
+                            break;
+                        }
+                    }
+                    
+                    if (companyName) {
+                        return {
+                            branch: companyName,
+                            id: entityKey,
+                            entityType: entityType,
+                            fullData: data,
+                            fields: Object.keys(data.fields)
+                        };
+                    } else {
+                        console.log('❌ Nom de société non trouvé dans les champs disponibles');
+                        console.log('Champs disponibles:', Object.keys(data.fields));
+                        throw new Error('Nom de société non trouvé dans les données API');
+                    }
+                } else {
+                    throw new Error('Structure de données API inattendue');
+                }
+                
+            } catch (error) {
+                console.log('❌ Erreur API Efficy:', error.message);
+                throw error;
+            }
+        }
+        
+        // Fonction pour essayer l'API cross-origin
+        async function tryEfficyApiCrossOrigin() {
+            try {
+                console.log('🌐 Tentative API cross-origin...');
+                
+                // Cette méthode nécessiterait que l'utilisateur soit connecté
+                // et que CORS soit configuré sur Efficy
+                
+                throw new Error('API cross-origin non configurée');
+                
+            } catch (error) {
+                console.log('API cross-origin impossible:', error.message);
+                return null;
             }
         }
         
