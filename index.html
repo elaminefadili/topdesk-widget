@@ -111,7 +111,7 @@
 <body>
     <div class="widget-container">
         <div class="widget-header">
-            <span class="widget-title">🎫 Tickets TopDesk</span>
+            <span class="widget-title">🎫 Tickets TopDesk (Ouverts)</span>
             <button class="refresh-btn" onclick="loadTickets()">🔄</button>
         </div>
         <div class="widget-content" id="ticketsContent">
@@ -136,221 +136,97 @@
             try {
                 console.log('=== Début récupération données Efficy ===');
                 
-                // Méthode 1 : Analyse de l'URL de la page parent pour extraire entity et key
+                // Méthode 1 : Paramètre URL (le plus fiable)
+                const urlParams = new URLSearchParams(window.location.search);
+                const branchParam = urlParams.get('branch') || urlParams.get('company') || urlParams.get('entity');
+                
+                if (branchParam) {
+                    // Décodage et nettoyage du paramètre
+                    const cleanBranch = decodeURIComponent(branchParam).trim();
+                    console.log(`✅ Branche trouvée via URL: "${cleanBranch}"`);
+                    return {
+                        branch: cleanBranch,
+                        source: 'url-parameter',
+                        reliable: true
+                    };
+                }
+                
+                console.log('⚠️ Aucun paramètre URL trouvé, tentative autres méthodes...');
+                
+                // Méthode 2 : Analyse de l'URL de la page parent pour extraire entity et key
                 if (window.parent && window.parent.location) {
-                    const parentUrl = window.parent.location.href;
-                    console.log('URL parent:', parentUrl);
-                    
-                    // Extraction de l'entity et de la key depuis l'URL
-                    const entityMatch = parentUrl.match(/entity=([^&]+)/);
-                    const keyMatch = parentUrl.match(/key=([^&]+)/);
-                    
-                    if (entityMatch && keyMatch) {
-                        const entityType = entityMatch[1];
-                        const entityKey = keyMatch[1];
-                        
-                        console.log(`Entité détectée: ${entityType}, ID: ${entityKey}`);
-                        
-                        // Maintenant on essaie de récupérer les données de cette entité
-                        return getEntityData(entityType, entityKey);
-                    }
-                }
-                
-                // Méthode 2 : Accès direct à l'objet entity
-                if (window.parent && window.parent.entity) {
-                    console.log('Entity object trouvé:', window.parent.entity);
-                    return extractBranchFromEntity(window.parent.entity);
-                }
-                
-                // Méthode 3 : Via l'API Efficy
-                if (window.parent && window.parent.efficy) {
-                    console.log('API Efficy disponible');
                     try {
-                        const currentRecord = window.parent.efficy.getCurrentRecord();
-                        if (currentRecord) {
-                            console.log('Record courant via API:', currentRecord);
-                            return extractBranchFromRecord(currentRecord);
+                        const parentUrl = window.parent.location.href;
+                        console.log('URL parent détectée');
+                        
+                        // Extraction de l'entity et de la key depuis l'URL
+                        const entityMatch = parentUrl.match(/entity=([^&]+)/);
+                        const keyMatch = parentUrl.match(/key=([^&]+)/);
+                        
+                        if (entityMatch && keyMatch) {
+                            const entityType = entityMatch[1];
+                            const entityKey = keyMatch[1];
+                            
+                            console.log(`Entité détectée: ${entityType}, ID: ${entityKey}`);
+                            
+                            // Pour une entité "Comp" (Company), on essaie de récupérer les données
+                            if (entityType === 'Comp') {
+                                return getCompanyData(entityType, entityKey);
+                            }
                         }
-                    } catch (e) {
-                        console.log('Erreur API getCurrentRecord:', e);
+                    } catch (securityError) {
+                        console.log('⚠️ Accès URL parent bloqué (CORS) - normal et sécurisé');
                     }
                 }
                 
-                // Méthode 4 : Recherche dans le DOM
-                return searchInDOM();
+                // Méthode 3 : Valeur par défaut
+                console.log('📝 Utilisation de la valeur par défaut');
+                return {
+                    branch: 'Praktijkhuis 74',
+                    source: 'default-fallback',
+                    reliable: false,
+                    note: 'Utilisez le paramètre URL ?branch=NomSociete pour rendre dynamique'
+                };
                 
             } catch (error) {
-                console.error('Erreur lors de la récupération:', error);
+                console.error('❌ Erreur lors de la récupération:', error);
                 return {
                     branch: 'Praktijkhuis 74',
                     source: 'error-fallback',
+                    reliable: false,
                     error: error.message
                 };
             }
         }
         
-        // Fonction pour récupérer les données d'une entité spécifique
-        function getEntityData(entityType, entityKey) {
-            console.log(`Récupération des données pour ${entityType}:${entityKey}`);
+        // Fonction pour récupérer les données d'une société spécifique
+        function getCompanyData(entityType, entityKey) {
+            console.log(`🔍 Tentative récupération données ${entityType}:${entityKey}`);
             
             try {
-                // Tentative d'accès aux données via différentes méthodes
+                // Cette partie nécessiterait l'API Efficy ou des permissions spéciales
+                // Pour l'instant, on retourne la valeur par défaut avec l'info de l'entité
                 
-                // Méthode A : Via window.parent.entityData ou similaire
-                if (window.parent.entityData || window.parent.currentEntity) {
-                    const entityData = window.parent.entityData || window.parent.currentEntity;
-                    console.log('EntityData trouvé:', entityData);
-                    return extractBranchFromEntity(entityData);
-                }
-                
-                // Méthode B : Recherche dans les formulaires de la page
-                if (window.parent.document) {
-                    const forms = window.parent.document.querySelectorAll('form');
-                    for (const form of forms) {
-                        const formData = new FormData(form);
-                        for (const [key, value] of formData.entries()) {
-                            if (key.toLowerCase().includes('company') || 
-                                key.toLowerCase().includes('vestiging') || 
-                                key.toLowerCase().includes('branch') ||
-                                key.toLowerCase().includes('naam')) {
-                                console.log(`Champ formulaire trouvé: ${key} = ${value}`);
-                                return {
-                                    branch: value,
-                                    source: `form.${key}`,
-                                    entityType: entityType,
-                                    entityKey: entityKey
-                                };
-                            }
-                        }
-                    }
-                }
-                
-                // Méthode C : Recherche par ID/name patterns spécifiques à Efficy
-                return searchEfficyFields(entityType, entityKey);
-                
-            } catch (error) {
-                console.error('Erreur getEntityData:', error);
-                return getDefaultBranch(entityType, entityKey);
-            }
-        }
-        
-        // Fonction pour extraire la branche depuis un objet entity
-        function extractBranchFromEntity(entity) {
-            console.log('Analyse de l\'objet entity:', entity);
-            
-            const possibleFields = [
-                'company', 'companyname', 'naam', 'name', 'bedrijfsnaam',
-                'vestiging', 'branch', 'location', 'locatie', 'branche'
-            ];
-            
-            for (const field of possibleFields) {
-                if (entity[field] && typeof entity[field] === 'string') {
-                    console.log(`Champ entity trouvé: ${field} = ${entity[field]}`);
-                    return {
-                        branch: entity[field],
-                        source: `entity.${field}`,
-                        entityData: entity
-                    };
-                }
-            }
-            
-            // Log de tous les champs pour debug
-            console.log('Tous les champs de l\'entity:', Object.keys(entity));
-            return getDefaultBranch('entity', 'unknown');
-        }
-        
-        // Fonction pour rechercher dans le DOM avec des patterns Efficy
-        function searchEfficyFields(entityType, entityKey) {
-            if (!window.parent.document) return getDefaultBranch(entityType, entityKey);
-            
-            console.log('Recherche dans le DOM avec patterns Efficy...');
-            
-            // Patterns spécifiques à Efficy
-            const efficySelectors = [
-                `input[name="COMPANY"]`, `input[name="company"]`,
-                `input[name="NAME"]`, `input[name="name"]`,
-                `select[name="COMPANY"]`, `select[name="company"]`,
-                `input[id*="company"]`, `input[id*="Company"]`,
-                `textarea[name*="company"]`, `textarea[name*="Company"]`,
-                // Patterns pour les champs de vestiging/branch
-                `input[name*="vestiging"]`, `input[name*="branch"]`,
-                `select[name*="vestiging"]`, `select[name*="branch"]`
-            ];
-            
-            for (const selector of efficySelectors) {
-                const field = window.parent.document.querySelector(selector);
-                if (field && field.value && field.value.trim()) {
-                    console.log(`Champ Efficy trouvé: ${selector} = ${field.value}`);
-                    return {
-                        branch: field.value.trim(),
-                        source: `efficy.${selector}`,
-                        entityType: entityType,
-                        entityKey: entityKey
-                    };
-                }
-            }
-            
-            // Recherche dans les éléments d'affichage (spans, divs avec classes Efficy)
-            const displaySelectors = [
-                '.field-value', '.entity-field-value', '.company-name',
-                'span[data-field="company"]', 'span[data-field="COMPANY"]',
-                'div[data-field="company"]', 'div[data-field="COMPANY"]'
-            ];
-            
-            for (const selector of displaySelectors) {
-                const element = window.parent.document.querySelector(selector);
-                if (element && element.textContent && element.textContent.trim()) {
-                    console.log(`Élément d'affichage trouvé: ${selector} = ${element.textContent.trim()}`);
-                    return {
-                        branch: element.textContent.trim(),
-                        source: `display.${selector}`,
-                        entityType: entityType,
-                        entityKey: entityKey
-                    };
-                }
-            }
-            
-            return getDefaultBranch(entityType, entityKey);
-        }
-        
-        // Fonction pour rechercher dans le DOM général
-        function searchInDOM() {
-            console.log('Recherche générale dans le DOM...');
-            
-            if (!window.parent.document) {
+                console.log('⚠️ API Efficy non accessible directement depuis le widget');
                 return {
                     branch: 'Praktijkhuis 74',
-                    source: 'no-parent-document'
+                    source: 'entity-detected-but-no-api-access',
+                    entityType: entityType,
+                    entityKey: entityKey,
+                    reliable: false,
+                    note: 'Entité détectée mais accès aux données limité. Utilisez le paramètre URL.'
+                };
+                
+            } catch (error) {
+                console.error('❌ Erreur getCompanyData:', error);
+                return {
+                    branch: 'Praktijkhuis 74',
+                    source: 'entity-error-fallback',
+                    entityType: entityType,
+                    entityKey: entityKey,
+                    reliable: false
                 };
             }
-            
-            // Recherche de texte contenant "Praktijkhuis"
-            const allElements = window.parent.document.querySelectorAll('*');
-            for (const element of allElements) {
-                const text = element.textContent;
-                if (text && text.includes('Praktijkhuis') && text.length < 100) {
-                    console.log(`Texte "Praktijkhuis" trouvé: ${text.trim()}`);
-                    return {
-                        branch: text.trim(),
-                        source: 'dom-text-search'
-                    };
-                }
-            }
-            
-            return {
-                branch: 'Praktijkhuis 74',
-                source: 'default-no-data-found'
-            };
-        }
-        
-        // Fonction pour retourner la branche par défaut avec contexte
-        function getDefaultBranch(entityType, entityKey) {
-            return {
-                branch: 'Praktijkhuis 74',
-                source: 'default-fallback',
-                entityType: entityType || 'unknown',
-                entityKey: entityKey || 'unknown'
-            };
         }
 
         // Fonction pour l'authentification TopDesk
@@ -368,15 +244,11 @@
             try {
                 console.log('Recherche des tickets pour:', contactInfo.branch);
                 
-                // Construction de la requête avec filtre pour tickets ouverts seulement
-                // Les statuts "ouverts" excluent généralement "closed", "resolved", "cancelled"
-                const branchQuery = `caller.branch.name=="${contactInfo.branch}"`;
-                const statusQuery = `(status!="closed";status!="resolved";status!="cancelled";status!="completed")`;
-                const combinedQuery = `${branchQuery};${statusQuery}`;
+                // Construction de la requête simple (sans filtres complexes qui causent l'erreur 400)
+                const query = `caller.branch.name=="${contactInfo.branch}"`;
+                const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(query)}&page_size=50`;
                 
-                const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(combinedQuery)}&page_size=50`;
-                
-                console.log('URL API avec filtre tickets ouverts:', url);
+                console.log('URL API simplifiée:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -388,20 +260,24 @@
                 }
 
                 const data = await response.json();
-                console.log('Données reçues (tickets ouverts seulement):', data);
+                console.log('Données reçues:', data);
                 
-                // Filtrage supplémentaire côté client si nécessaire
+                // Filtrage côté client pour les tickets ouverts
                 const openTickets = Array.isArray(data) ? data.filter(ticket => {
                     const status = ticket.status?.toLowerCase() || '';
                     const processingStatus = ticket.processingStatus?.name?.toLowerCase() || '';
                     
                     // Exclure les tickets fermés/résolus
-                    return !status.includes('closed') && 
-                           !status.includes('resolved') && 
-                           !status.includes('cancelled') && 
-                           !status.includes('completed') &&
-                           !processingStatus.includes('opgelost') &&
-                           !processingStatus.includes('gesloten');
+                    const isClosed = status.includes('closed') || 
+                                   status.includes('resolved') || 
+                                   status.includes('cancelled') || 
+                                   status.includes('completed') ||
+                                   processingStatus.includes('opgelost') ||
+                                   processingStatus.includes('gesloten') ||
+                                   processingStatus.includes('resolved') ||
+                                   processingStatus.includes('closed');
+                    
+                    return !isClosed;
                 }) : [];
                 
                 console.log(`Tickets filtrés: ${openTickets.length} tickets ouverts sur ${data.length} total`);
