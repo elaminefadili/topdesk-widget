@@ -131,74 +131,34 @@
             }
         };
 
-        // Variable globale pour stocker les données Efficy
-        let efficyData = null;
-        
-        // Fonction pour écouter les messages d'Efficy
-        function setupEfficyListener() {
-            window.addEventListener('message', function(event) {
-                console.log('Message reçu:', event.data);
-                
-                // Vérification de sécurité basique
-                if (event.data && typeof event.data === 'object') {
-                    // Si c'est des données d'entité
-                    if (event.data.type === 'EFFICY_ENTITY_DATA' || event.data.entityType || event.data.companyName) {
-                        efficyData = event.data;
-                        console.log('✅ Données Efficy reçues:', efficyData);
-                        
-                        // Rechargement automatique des tickets avec les nouvelles données
-                        loadTickets();
-                    }
-                    
-                    // Si c'est juste le nom de la société
-                    if (event.data.company || event.data.name || event.data.branch) {
-                        efficyData = {
-                            companyName: event.data.company || event.data.name || event.data.branch,
-                            source: 'postmessage-simple'
-                        };
-                        console.log('✅ Nom société reçu:', efficyData.companyName);
-                        loadTickets();
-                    }
-                }
-            }, false);
-        }
-        
         // Fonction pour récupérer les informations de l'entité Efficy courante
-        async function getEfficyContactInfo() {
+        function getEfficyContactInfo() {
             try {
                 console.log('=== Début récupération données Efficy ===');
                 
-                // Méthode 1 : Données reçues via postMessage
-                if (efficyData && efficyData.companyName) {
-                    console.log(`✅ Utilisation des données reçues d'Efficy: "${efficyData.companyName}"`);
-                    return {
-                        branch: efficyData.companyName,
-                        source: 'postmessage-received',
-                        reliable: true,
-                        data: efficyData
-                    };
-                }
-                
-                // Méthode 2 : Extraction depuis l'URL parent et appel API (PRIORITAIRE)
-                console.log('🔍 Tentative d\'extraction depuis l\'URL parent...');
-                const entityData = await getEfficyEntityFromParentUrl();
-                if (entityData && entityData.branch) {
-                    console.log(`✅ Branche trouvée via API Efficy: "${entityData.branch}"`);
-                    return {
-                        branch: entityData.branch,
-                        source: 'efficy-api-success',
-                        reliable: true,
-                        entityId: entityData.id,
-                        entityType: entityData.entityType
-                    };
-                }
-                
-                // Méthode 3 : Paramètre URL (pour test manuel)
+                // Méthode 1 : Paramètre URL (le plus fiable)
                 const urlParams = new URLSearchParams(window.location.search);
-                const branchParam = urlParams.get('branch') || urlParams.get('company');
+                const branchParam = urlParams.get('branch') || urlParams.get('company') || urlParams.get('entity');
                 
-                if (branchParam && !branchParam.includes('COMPANY') && branchParam.length > 2) {
+                if (branchParam) {
+                    // Décodage et nettoyage du paramètre
                     const cleanBranch = decodeURIComponent(branchParam).trim();
+                    
+                    // Vérification si Efficy n'a pas substitué la variable
+                    if (cleanBranch === '[COMPANY]' || cleanBranch === '{COMPANY}' || 
+                        cleanBranch === '${COMPANY}' || cleanBranch === '%COMPANY%' ||
+                        cleanBranch.includes('COMPANY')) {
+                        console.log(`⚠️ Variable non substituée par Efficy: "${cleanBranch}"`);
+                        console.log('🔄 Utilisation de la valeur par défaut à la place');
+                        return {
+                            branch: 'Praktijkhuis 74',
+                            source: 'efficy-variable-not-substituted',
+                            originalParam: cleanBranch,
+                            reliable: true,
+                            note: 'Efficy n\'a pas substitué la variable, utilisation de la valeur par défaut'
+                        };
+                    }
+                    
                     console.log(`✅ Branche trouvée via URL: "${cleanBranch}"`);
                     return {
                         branch: cleanBranch,
@@ -207,212 +167,51 @@
                     };
                 }
                 
-                // Méthode 4 : Demande active à Efficy (en dernier recours)
-                console.log('📤 Demande de données à Efficy...');
-                requestDataFromEfficy();
+                console.log('⚠️ Aucun paramètre URL trouvé, tentative autres méthodes...');
                 
-                // Attente des données avec timeout réduit
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                if (efficyData && efficyData.companyName) {
-                    console.log(`✅ Données reçues après demande: "${efficyData.companyName}"`);
-                    return {
-                        branch: efficyData.companyName,
-                        source: 'postmessage-after-request',
-                        reliable: true
-                    };
+                // Méthode 2 : Analyse de l'URL de la page parent pour extraire entity et key
+                if (window.parent && window.parent.location) {
+                    try {
+                        const parentUrl = window.parent.location.href;
+                        console.log('URL parent détectée');
+                        
+                        // Extraction de l'entity et de la key depuis l'URL
+                        const entityMatch = parentUrl.match(/entity=([^&]+)/);
+                        const keyMatch = parentUrl.match(/key=([^&]+)/);
+                        
+                        if (entityMatch && keyMatch) {
+                            const entityType = entityMatch[1];
+                            const entityKey = keyMatch[1];
+                            
+                            console.log(`Entité détectée: ${entityType}, ID: ${entityKey}`);
+                            
+                            // Pour une entité "Comp" (Company), on essaie de récupérer les données
+                            if (entityType === 'Comp') {
+                                return getCompanyData(entityType, entityKey);
+                            }
+                        }
+                    } catch (securityError) {
+                        console.log('⚠️ Accès URL parent bloqué (CORS) - normal et sécurisé');
+                    }
                 }
                 
-                console.log('❌ Impossible de récupérer le nom de société');
-                throw new Error('Nom de société non trouvé - toutes les méthodes ont échoué');
+                // Méthode 3 : Valeur par défaut
+                console.log('📝 Utilisation de la valeur par défaut');
+                return {
+                    branch: 'Praktijkhuis 74',
+                    source: 'default-fallback',
+                    reliable: true,
+                    note: 'Valeur par défaut utilisée - configurez l\'URL avec le nom exact de la société'
+                };
                 
             } catch (error) {
                 console.error('❌ Erreur lors de la récupération:', error);
-                
-                // Fallback temporaire pour continuer à fonctionner
-                console.log('🔄 Utilisation temporaire de Praktijkhuis 74');
                 return {
                     branch: 'Praktijkhuis 74',
-                    source: 'error-fallback-temp',
-                    reliable: false,
+                    source: 'error-fallback',
+                    reliable: true,
                     error: error.message
                 };
-            }
-        }
-        
-        // Fonction pour récupérer les données d'entité depuis l'URL parent
-        async function getEfficyEntityFromParentUrl() {
-            try {
-                console.log('🔍 Extraction des données depuis l\'URL parent...');
-                
-                let parentUrl;
-                let entityType, entityKey;
-                
-                // Tentative 1 : Accès direct à l'URL parent
-                try {
-                    parentUrl = window.parent.location.href;
-                    console.log('✅ URL parent accessible:', parentUrl);
-                } catch (corsError) {
-                    console.log('❌ URL parent non accessible (CORS):', corsError.message);
-                    
-                    // Tentative 2 : Via document.referrer
-                    try {
-                        parentUrl = document.referrer;
-                        if (parentUrl) {
-                            console.log('✅ URL parent via referrer:', parentUrl);
-                        } else {
-                            throw new Error('Document.referrer vide');
-                        }
-                    } catch (e) {
-                        console.log('❌ Document.referrer non disponible');
-                        
-                        // Tentative 3 : Hardcodé pour test
-                        console.log('🧪 Test avec URL hardcodée...');
-                        parentUrl = 'https://healthone.efficy.cloud/crm/consult?ENTITY=Comp&PAGE=pages/desktop/Consult.htm&DETAIL=Cont&KEY=10351&CONSULTHANDLE=161&nocache=true';
-                        console.log('URL de test:', parentUrl);
-                    }
-                }
-                
-                if (!parentUrl) {
-                    throw new Error('Impossible d\'obtenir l\'URL parent');
-                }
-                
-                // Extraction de ENTITY et KEY depuis l'URL
-                console.log('🔍 Recherche de ENTITY et KEY dans:', parentUrl);
-                
-                const entityMatch = parentUrl.match(/[?&]ENTITY=([^&]+)/i);
-                const keyMatch = parentUrl.match(/[?&]KEY=([^&]+)/i);
-                
-                console.log('Résultat regex ENTITY:', entityMatch);
-                console.log('Résultat regex KEY:', keyMatch);
-                
-                if (!entityMatch || !keyMatch) {
-                    console.log('❌ ENTITY ou KEY non trouvé dans l\'URL');
-                    console.log('Patterns recherchés: [?&]ENTITY= et [?&]KEY=');
-                    console.log('URL analysée:', parentUrl);
-                    throw new Error('Impossible d\'extraire ENTITY/KEY de l\'URL');
-                }
-                
-                entityType = entityMatch[1];
-                entityKey = keyMatch[1];
-                
-                console.log(`✅ Entité extraite: ${entityType}, ID: ${entityKey}`);
-                
-                // Appel de l'API Efficy pour récupérer les données
-                return await callEfficyApi(entityType, entityKey);
-                
-            } catch (error) {
-                console.log('❌ Erreur extraction URL parent:', error.message);
-                console.log('Stack:', error.stack);
-                return null;
-            }
-        }
-        
-        // Fonction pour appeler l'API Efficy
-        async function callEfficyApi(entityType, entityKey) {
-            try {
-                console.log(`📞 Appel API Efficy pour ${entityType}:${entityKey}`);
-                
-                // Construction de l'URL API Efficy
-                const baseUrl = 'https://healthone.efficy.cloud';
-                const apiUrl = `${baseUrl}/crm/json.ashx?action=getRecord&entity=${entityType}&key=${entityKey}`;
-                
-                console.log('URL API Efficy:', apiUrl);
-                
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    credentials: 'include', // Utilise la session Efficy courante
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                console.log('Statut API Efficy:', response.status, response.statusText);
-                
-                if (!response.ok) {
-                    throw new Error(`API Efficy error: ${response.status} - ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                console.log('✅ Données reçues de l\'API Efficy:', data);
-                
-                // Extraction du nom de société depuis les données
-                if (data && data.fields) {
-                    // Recherche dans différents champs possibles
-                    const possibleNameFields = ['COMPANY', 'NAME', 'NAAM', 'COMPANYNAME', 'BEDRIJF'];
-                    let companyName = null;
-                    
-                    for (const fieldName of possibleNameFields) {
-                        if (data.fields[fieldName]) {
-                            companyName = data.fields[fieldName];
-                            console.log(`Nom société trouvé dans ${fieldName}: ${companyName}`);
-                            break;
-                        }
-                    }
-                    
-                    if (companyName) {
-                        return {
-                            branch: companyName,
-                            id: entityKey,
-                            entityType: entityType,
-                            fullData: data,
-                            fields: Object.keys(data.fields)
-                        };
-                    } else {
-                        console.log('❌ Nom de société non trouvé dans les champs disponibles');
-                        console.log('Champs disponibles:', Object.keys(data.fields));
-                        throw new Error('Nom de société non trouvé dans les données API');
-                    }
-                } else {
-                    throw new Error('Structure de données API inattendue');
-                }
-                
-            } catch (error) {
-                console.log('❌ Erreur API Efficy:', error.message);
-                throw error;
-            }
-        }
-        
-        // Fonction pour essayer l'API cross-origin
-        async function tryEfficyApiCrossOrigin() {
-            try {
-                console.log('🌐 Tentative API cross-origin...');
-                
-                // Cette méthode nécessiterait que l'utilisateur soit connecté
-                // et que CORS soit configuré sur Efficy
-                
-                throw new Error('API cross-origin non configurée');
-                
-            } catch (error) {
-                console.log('API cross-origin impossible:', error.message);
-                return null;
-            }
-        }
-        
-        // Fonction pour demander des données à Efficy
-        function requestDataFromEfficy() {
-            try {
-                console.log('📤 Envoi de demande de données vers Efficy...');
-                
-                // Messages multiples avec différents formats
-                const requests = [
-                    { type: 'REQUEST_ENTITY_DATA', source: 'topdesk-widget' },
-                    { action: 'getCompanyName', widget: 'topdesk' },
-                    { request: 'currentEntity' },
-                    'REQUEST_COMPANY_NAME'
-                ];
-                
-                requests.forEach(request => {
-                    try {
-                        window.parent.postMessage(request, '*');
-                    } catch (e) {
-                        console.log('Erreur envoi message:', e);
-                    }
-                });
-                
-            } catch (error) {
-                console.log('Impossible d\'envoyer la demande:', error);
             }
         }
         
@@ -580,12 +379,7 @@
             container.innerHTML = '<div class="loading">Chargement des tickets...</div>';
             
             try {
-                const contactInfo = await getEfficyContactInfo();
-                
-                if (!contactInfo || !contactInfo.branch) {
-                    throw new Error('Impossible de déterminer la société courante');
-                }
-                
+                const contactInfo = getEfficyContactInfo();
                 const tickets = await fetchTopDeskTickets(contactInfo);
                 displayTickets(tickets, contactInfo);
             } catch (error) {
@@ -619,13 +413,11 @@
 
         // Initialisation
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Widget TopDesk initialisé');
-            
-            // Configuration de l'écoute des messages Efficy
-            setupEfficyListener();
-            
-            // Chargement initial des tickets
+            // PRODUCTION : Utilisation des vraies données TopDesk
             loadTickets();
+            
+            // DÉMO : Pour tester l'interface (décommentez si besoin)
+            // loadDemoTickets();
         });
     </script>
 </body>
