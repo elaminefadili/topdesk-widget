@@ -368,11 +368,15 @@
             try {
                 console.log('Recherche des tickets pour:', contactInfo.branch);
                 
-                // Construction de la requête basée sur la branche
-                const query = `caller.branch.name=="${contactInfo.branch}"`;
-                const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(query)}&page_size=50`;
+                // Construction de la requête avec filtre pour tickets ouverts seulement
+                // Les statuts "ouverts" excluent généralement "closed", "resolved", "cancelled"
+                const branchQuery = `caller.branch.name=="${contactInfo.branch}"`;
+                const statusQuery = `(status!="closed";status!="resolved";status!="cancelled";status!="completed")`;
+                const combinedQuery = `${branchQuery};${statusQuery}`;
                 
-                console.log('URL API:', url);
+                const url = `${TOPDESK_CONFIG.baseUrl}${TOPDESK_CONFIG.apiPath}?query=${encodeURIComponent(combinedQuery)}&page_size=50`;
+                
+                console.log('URL API avec filtre tickets ouverts:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -384,8 +388,24 @@
                 }
 
                 const data = await response.json();
-                console.log('Données reçues:', data);
-                return Array.isArray(data) ? data : [];
+                console.log('Données reçues (tickets ouverts seulement):', data);
+                
+                // Filtrage supplémentaire côté client si nécessaire
+                const openTickets = Array.isArray(data) ? data.filter(ticket => {
+                    const status = ticket.status?.toLowerCase() || '';
+                    const processingStatus = ticket.processingStatus?.name?.toLowerCase() || '';
+                    
+                    // Exclure les tickets fermés/résolus
+                    return !status.includes('closed') && 
+                           !status.includes('resolved') && 
+                           !status.includes('cancelled') && 
+                           !status.includes('completed') &&
+                           !processingStatus.includes('opgelost') &&
+                           !processingStatus.includes('gesloten');
+                }) : [];
+                
+                console.log(`Tickets filtrés: ${openTickets.length} tickets ouverts sur ${data.length} total`);
+                return openTickets;
                 
             } catch (error) {
                 console.error('Erreur fetch TopDesk:', error);
@@ -511,9 +531,11 @@
 
         // Initialisation
         document.addEventListener('DOMContentLoaded', function() {
-            // Pour tester : utilisez loadDemoTickets()
-            // Pour la production : utilisez loadTickets()
-            loadTickets(); // Changez par loadTickets() quand prêt
+            // PRODUCTION : Utilisation des vraies données TopDesk
+            loadTickets();
+            
+            // DÉMO : Pour tester l'interface (décommentez si besoin)
+            // loadDemoTickets();
         });
     </script>
 </body>
